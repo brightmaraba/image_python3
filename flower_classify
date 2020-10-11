@@ -1,0 +1,403 @@
+{
+ "metadata": {
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.5-final"
+  },
+  "orig_nbformat": 2,
+  "kernelspec": {
+   "name": "python3",
+   "display_name": "Python 3"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2,
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Import packages\n",
+    "\n",
+    "import matplotlib.pyplot as plt\n",
+    "import numpy as np\n",
+    "import os\n",
+    "import PIL\n",
+    "import tensorflow as tf\n",
+    "\n",
+    "from tensorflow import keras\n",
+    "from tensorflow.keras import layers\n",
+    "from tensorflow.keras.models import Sequential"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Import Dataset\n",
+    "\n",
+    "import pathlib\n",
+    "dataset_url = \"https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz\"\n",
+    "data_dir = tf.keras.utils.get_file('flower_photos', origin=dataset_url, untar=True)\n",
+    "data_dir = pathlib.Path(data_dir)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Count total images in dataset\n",
+    "\n",
+    "image_count = len(list(data_dir.glob('*/*.jpg')))\n",
+    "print(image_count)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Display some flowers\n",
+    "\n",
+    "roses = list(data_dir.glob('roses/*'))\n",
+    "PIL.Image.open(str(roses[0]))\n",
+    "tulips = list(data_dir.glob('tulips/*'))\n",
+    "PIL.Image.open(str(tulips[0]))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Preprocess the data with Keras - Create training dataset\n",
+    "\n",
+    "batch_size = 32\n",
+    "img_height = 180\n",
+    "img_width = 180\n",
+    "\n",
+    "train_ds = tf.keras.preprocessing.image_dataset_from_directory(\n",
+    "    data_dir,\n",
+    "    validation_split=0.2,\n",
+    "    subset=\"training\",\n",
+    "    seed=123,\n",
+    "    image_size=(img_height, img_width), batch_size=batch_size)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Preprocess the data with Keras - Create validation dataset\n",
+    "\n",
+    "val_ds = tf.keras.preprocessing.image_dataset_from_directory(\n",
+    "    data_dir,\n",
+    "    validation_split=0.2,\n",
+    "    subset=\"validation\",\n",
+    "    seed=123,\n",
+    "    image_size=(img_height, img_width), batch_size=batch_size)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Review class names\n",
+    "\n",
+    "class_names = train_ds.class_names\n",
+    "print(class_names)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Visualiza the data\n",
+    "\n",
+    "import matplotlib.pyplot as plt\n",
+    "\n",
+    "plt.figure(figsize=(10,10))\n",
+    "for images, labels in train_ds.take(1):\n",
+    "    for i in range(9):\n",
+    "        ax= plt.subplot(3, 3, i + 1)\n",
+    "        plt.imshow(images[i].numpy().astype(\"uint8\"))\n",
+    "        plt.title(class_names[labels[i]])\n",
+    "        plt.axis(\"off\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Configure dataset for performance\n",
+    "\n",
+    "AUTOTUNE = tf.data.experimental.AUTOTUNE\n",
+    "\n",
+    "train_ds = train_ds.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)\n",
+    "val_ds = val_ds.cache().prefetch(buffer_size=AUTOTUNE)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Standaradize the data from RGB [0, 255] to [0, 1]\n",
+    "\n",
+    "normalization_layer = layers.experimental.preprocessing.Rescaling(1./255)\n",
+    "\n",
+    "normalized_ds = train_ds.map(lambda x, y: (normalization_layer(x), y))\n",
+    "image_batch, labels_batch = next(iter(normalized_ds))\n",
+    "first_image = image_batch[0]\n",
+    "\n",
+    "print(np.min(first_image), np.max(first_image))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Create model\n",
+    "\n",
+    "num_classes = 5\n",
+    "\n",
+    "model = Sequential([\n",
+    "    layers.experimental.preprocessing.Rescaling(1./255, input_shape=(img_height, img_width, 3)),\n",
+    "    layers.Conv2D(16, 3, padding=\"same\", activation='relu'),\n",
+    "    layers.MaxPooling2D(),\n",
+    "    layers.Conv2D(32, 3, padding=\"same\", activation='relu'),\n",
+    "    layers.MaxPooling2D(),\n",
+    "    layers.Flatten(),\n",
+    "    layers.Dense(128, activation='relu'),\n",
+    "    layers.Dense(num_classes)\n",
+    "])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Compile the model\n",
+    "\n",
+    "model.compile(optimizer='adam',\n",
+    "loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),\n",
+    "metrics=['accuracy'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# View model summary\n",
+    "\n",
+    "model.summary()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Train the model\n",
+    "\n",
+    "epochs=10\n",
+    "history = model.fit(\n",
+    "    train_ds,\n",
+    "    validation_data=val_ds,\n",
+    "    epochs=epochs\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Visualize training results\n",
+    "\n",
+    "acc = history.history['accuracy']\n",
+    "val_acc = history.history['val_accuracy']\n",
+    "\n",
+    "loss = history.history['loss']\n",
+    "val_loss = history.history['val_loss']\n",
+    "\n",
+    "epochs_range = range(epochs)\n",
+    "\n",
+    "plt.figure(figsize(8, 8))\n",
+    "plt.subplot(1, 2, 1)\n",
+    "plt.plot(epochs_range, acc, label='Training Accuracy')\n",
+    "plt.plot(epochs_range, val_acc, label=\"Validation Loss\")\n",
+    "plt.legend(loc='upper right')\n",
+    "plt.title('Training and Validation Loss')\n",
+    "plt.show()\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Data Augmentation to reduce overfitting\n",
+    "\n",
+    "data_augmentation = keras.Sequential(\n",
+    "    [\n",
+    "        layers.experimental.preprocessing.RandomFlip(\"horizontal\",\n",
+    "                                                  input_shape=(img_height, img_width, 3)),\n",
+    "        layers.experimental.preprocessing.RandomRotation(0.1),\n",
+    "        layers.experimental.preprocessing.RandomZoom(0.1)\n",
+    "    ]\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Visualize a few augmented examples\n",
+    "\n",
+    "plt.figure(figsize=(10, 10))\n",
+    "for images, _ in train_ds.take(1):\n",
+    "    for i in range(9):\n",
+    "        augmented_images = data_augmentation(images)\n",
+    "        ax = plt.subplot(3, 3, i + 1)\n",
+    "        plt.imshow(augmented_images[0].numpy().astype(\"uint8\"))\n",
+    "        plt.axis(\"off\")\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Option - User Dropout (A form of regularization) to reduce overfitting\n",
+    "\n",
+    "model = Sequential ([\n",
+    "    data_augmentation,\n",
+    "    layers.experimental.preprocessing.Rescaling(1./255),\n",
+    "    layers.Conv2D(16, 3, padding='same', activation='relu'),\n",
+    "    layers.MaxPooling2D(),\n",
+    "    layers.Conv2D(32, 3, padding='same', activation='relu'),\n",
+    "    layers.MaxPooling2D(),\n",
+    "    layers.Conv2D(64, 3, padding='same', activation='relu'),\n",
+    "    layers.MaxPooling2D(),\n",
+    "    layers.Dropout(0.2),\n",
+    "    layers.Flatten(),\n",
+    "    layers.Dense(128, activation='relu'),\n",
+    "    layers.Dense(num_classes)\n",
+    "])\n",
+    "\n",
+    "# Compile and train the model\n",
+    "model.compile(optimizer=\"Adam\",\n",
+    "                loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),\n",
+    "                metrics=['accuracy'])\n",
+    "\n",
+    "model.summary()\n",
+    "\n",
+    "epochs =15\n",
+    "history = model.fit(train_ds, validation_data=val_ds, epochs=epochs)\n",
+    "\n",
+    "# Visualize training results\n",
+    "\n",
+    "acc = history.history['accuracy']\n",
+    "val_acc = history.history['val_accuracy']\n",
+    "\n",
+    "loss = history.history['loss']\n",
+    "val_loss = history.history['val_loss']\n",
+    "\n",
+    "epochs_range = range(epochs)\n",
+    "\n",
+    "plt.figure(figsize=(8, 8))\n",
+    "plt.subplot(1, 2, 1)\n",
+    "plt.plot(epochs_range, acc, label='Training Accuracy')\n",
+    "plt.plot(epochs_range, val_acc, label=\"Validation Accuracy\")\n",
+    "plt.legend(loc=\"lower ight\")\n",
+    "plt.title('Training and Validation Accuracy')\n",
+    "\n",
+    "plt.subplot(1, 2, 2)\n",
+    "plt.plot(epochs_range, loss, label='Training Loss')\n",
+    "plt.plot(epochs_range, val_loss, label=\"Validation Loss\")\n",
+    "plt.legend(loc='upper right')\n",
+    "plt.title('Training and Validation Loss')\n",
+    "plt.show()\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 48,
+   "metadata": {},
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "text": [
+      "This image most like belongs to sunflowers with ad 95.19 percent confidence.\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Classify an image that was not included in the training or validation sets\n",
+    "\n",
+    "sunflower_url = \"https://storage.googleapis.com/download.tensorflow.org/example_images/592px-Red_sunflower.jpg\"\n",
+    "sunflower_path = tf.keras.utils.get_file('Red_sunflower', origin=sunflower_url)\n",
+    "\n",
+    "img = keras.preprocessing.image.load_img(sunflower_path, target_size=(img_height, img_width))\n",
+    "img_array = keras.preprocessing.image.img_to_array(img)\n",
+    "img_array = tf.expand_dims(img_array, 0)\n",
+    "\n",
+    "predictions = model.predict(img_array)\n",
+    "score = tf.nn.softmax(predictions[0])\n",
+    "print(\n",
+    "    \"This image most like belongs to {} with ad {:.2f} percent confidence.\".format(class_names[np.argmax(score)], 100 * np.max(score))\n",
+    "    )"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ]
+}
